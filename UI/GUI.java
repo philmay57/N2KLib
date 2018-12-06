@@ -647,16 +647,17 @@ public class GUI extends JFrame implements Runnable
     		}
         */
 
+  			autohelm = Autohelm.TRACK;
     		if (simulatedMsgs.autoHelmSwitch(Autohelm.TRACK))
     		{
-    			autohelm = Autohelm.TRACK;
       		GUIUtils.messageBox("Autohelm", "Tracking");
       	}
       	else
       	{
       		GUIUtils.messageBox("Autohelm", 
-      				"Tracking information is not available or chart plotter is not following a route\r\n" +
-      		    "(Check received messages display a 'crossTrackError' which has 'navigationTerminated' set to No)");
+      				"Tracking information is not currently available.  The autohelm will start working when\r\n" +
+      		    "it receives a 'crossTrackError' message which has 'navigationTerminated' set to No\r\n" +
+      				"Until then the helm is locked.\r\n");		
       		
       	}
         break;

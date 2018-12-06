@@ -45,7 +45,7 @@ public class SimulatedMessages
   double sog;
   double alt = 2.5;
   double dev = 0.0;
-  double var = 0.0;
+  double var = -0.0314;
   double ber = 1.0;
 
   double lastXte = 0;
@@ -108,7 +108,7 @@ public class SimulatedMessages
     public int pgn;
     public String description;
     boolean enabled = false;
-    public int period = 2000;  // default to 1 second interval
+    public int period = 2000;  // default to 2 second interval
     int priority = 3;
     SimulatedMessage(int pgn, String desc)
     {
@@ -686,10 +686,15 @@ public class SimulatedMessages
     wa = randomizeAngle(targetwa, wa, 1, 20);
     ws = randomize(targetws, ws, 5, 1);
     dep = randomize(targetdep, dep, 90, 100);
-
+    
+    Trace.debug("Set heading to " + Utils.radstodegs(hdg) + 
+    		        " speed to " + spd + 
+    		        " tda to " + Utils.radstodegs(tda) +
+    		        " tid to " + tid); 
+    
     if (lastTime != 0)
     {
-      // Calculate sog and cog from heading, speed and tides
+      // Calculate sog and cog from heading, speed and tides and then work out new lat/long
       double hdgvx = Math.sin(hdg) * spd;
       double tidvx = Math.sin(tda) * tid;
       double hdgvy = Math.cos(hdg) * spd;
@@ -758,7 +763,7 @@ public class SimulatedMessages
     targetspd = GUIUtils.getBigDecimalValue(props, Props.sSpd, 6.0) * 0.5144;
     targetdep = GUIUtils.getBigDecimalValue(props, Props.sDep, 100.0);
     targethdg = Utils.degstorads(GUIUtils.getBigDecimalValue(props, Props.sHdg, 270.0));
-    targettid = GUIUtils.getBigDecimalValue(props, Props.sTid, 1);
+    targettid = GUIUtils.getBigDecimalValue(props, Props.sTid, 1.0) * 0.5144;
     targettda = Utils.degstorads(GUIUtils.getBigDecimalValue(props, Props.sTda, 0.0));
     targetws  = GUIUtils.getBigDecimalValue(props, Props.sWs, 15.0) * 0.5144;
     targetwa  = Utils.degstorads(GUIUtils.getBigDecimalValue(props, Props.sWa, 100.0));
@@ -804,9 +809,8 @@ public class SimulatedMessages
       }
       else
       {
-        // We calculate the target angle X from  sog*sin(X-bearing to waypoint) = min(K * xte, sog*.9)
-        // so X = asin(Math.min(K*xte, sog*.9)/sog) + bearing to waypoint
-        // Then we apply a small change to the target heading to make it match this value 
+      	// The E120 sends us cross track packets with zero XTE.  We need to ignore these
+      	// so we generate pseudo-xte values by interpolating from the packets that do have a value.
         double xte = packet.fields[N2K.crossTrackError.xte].getDecimal();
         double xteDelta = xte - lastDeltaXte;
         //Trace.debug("Time since last XTE " + timedelta);
@@ -815,10 +819,10 @@ public class SimulatedMessages
           //Trace.debug("Got an XTE delta, time since last " + (curTime - lastDeltaXteTime));
           if (lastDeltaXteTime > 0)
           {
-            // Work out rate of change of XTE so we can get an intermediate value
-            xtv = xteDelta / (curTime - lastDeltaXteTime);
-            //Trace.debug("XTE delta " + xteDelta + " over " + (curTime - lastDeltaXteTime) + 
-            //           "ms, cross track rate of change is " + xtv);
+          	xtv = (xteDelta / (curTime - lastDeltaXteTime));
+            //Trace.debug("XTE now " + xte + " delta is " + xteDelta + 
+            //		        " over " + (curTime - lastDeltaXteTime) + 
+            //           "ms, cross track rate of change is " + xtv + " per ms");
           }
           lastDeltaXte = xte;
           lastDeltaXteTime = curTime;
@@ -832,6 +836,9 @@ public class SimulatedMessages
         //Trace.debug("Navigating to " + ((int)(Utils.radstodegs(navBearing))) +
         //            " current heading " + ((int)(Utils.radstodegs(targethdg))) +
         //            " XTE is " + xte);
+        
+        // If the "cross track angle" (target heading - bearing to destination) is large
+        // then we just turn quickly towards the target.
         double cta = GUIUtils.normalizeAngle180(targethdg - navBearing);
         double targetChange;
         if (Math.abs(cta) > Math.PI/2)
@@ -844,26 +851,34 @@ public class SimulatedMessages
         }
         else
         {
+          // We now calculate a track by minimising the rate of change of cross track error
+        	// (ie try and get the cross track velocity down to zero)
+        	// Cross track velocity is SOG * sin(current track - bearing to destination)
+        	// so we use sin(track-bearing to dest) = min(K * xte, sog*.9)/SOG, where K is 
+        	// just some constant that controls the rate of adjustment.  In fact, if we ue
+        	// log(1 + Kabs(xte)/SOG) then we get a smoother approach to the track
+          // The one quirk is that if we are running along the track, such that xtv is 
+        	// flipping between + and - then our adjustment in heading is asymmetric 
+        	// if there is any cross current, and we end up with a course offset from the 
+        	// track.  We can allow for this by factoring in the difference between bearing
+        	// and COG, so 
+        	// heading delta = arcsin(log(1+K*abs(xte)/sog)) + L*sin(heading - SOG)
+        	double K = 0.1;
+        	double L = -0.8;
           int sign = 1;
           if (xte < 0) sign = -1;
-          double kxte = sign*Math.log(1 + Math.abs(xte)/10/sog);
-          //double kxte = xte/5/sog;
-          if (xte > 0)
-          {
-            if (kxte > 0.9) kxte = 0.9;
-          }
-          else
-          {
-            if (kxte < -0.9) kxte = -0.9;
-          }
-          //Trace.debug("Sog " + sog + " xte / sog / 5 is " + (-kxte) + 
-          //                    " arcsin is " + Math.asin(-kxte));
+          double kxte = sign*Math.log(1 + (Math.abs(xte) * K / sog));
+          kxte = kxte + Math.sin(targethdg - cog) * L;
+          if (kxte > 0.9) kxte = 0.9;
+          if (kxte < -0.9) kxte = -0.9;
+          
           double newTarget = GUIUtils.normalizeAngle360(Math.asin(-kxte) + navBearing);
           targetChange   = GUIUtils.normalizeAngle180(newTarget - targethdg);
-          Trace.normal("Xte is " + xte +  " new target heading " + Utils.radstodegs(newTarget) + 
-                       " target change is " + Utils.radstodegs(targetChange) + " degrees");
+          Trace.debug("Sog " + sog + " xte " + xte + " -kxte is " + (-kxte) + 
+              " arcsin is " + Math.asin(-kxte) + " target heading now " + Utils.radstodegs(newTarget) +
+              " target change is " + Utils.radstodegs(targetChange) + " degrees");
           if (targetChange > 0.2) targetChange = 0.2;
-          if (targetChange < -0.2) targetChange = -0.2;
+          if (targetChange < -0.2) targetChange = -0.2;          
         }
 
         Trace.normal("XTE now " + xte + " target change is " + Utils.radstodegs(targetChange) + " degrees");
