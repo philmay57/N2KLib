@@ -84,11 +84,11 @@ public class N2KPacket
    */
   public long  time;
   /**
-   * The description, looked up by PGN in the XML file the defines all the N2K messages  
+   * The description, looked up by PGN in the XML file that defines all the N2K messages  
    */
   public String description;
   /**
-   * The base set of fields associalted with theis N2K message
+   * The base set of fields associated with theis N2K message
    */
   public N2KField[] fields = null;
   /**
@@ -309,6 +309,7 @@ public class N2KPacket
     fldDefs = locatePGN(pgn, match, null, 0);
     if (fldDefs != null)
     {
+    	this.description = fldDefs.pgnInfo.Description;
       N2KFieldDef[] fldDefArray = fldDefs.fieldDefArray;
       if (fldDefArray != null)
       {
