@@ -182,7 +182,7 @@ public class N2KFieldDef
       {
         aligned = true;
       }
-      if ((bitLength + (bitOff % 8)) <= 32)
+      if ((type == Type.BYTES) && ((bitLength + (bitOff % 8)) <= 32))
       {
         // We store binary data that we can load into a 32 bit integer as integer internally
         type = Type.INT;
